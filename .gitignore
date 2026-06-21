@@ -1,0 +1,13 @@
+# Ignore generated artifacts
+/data/
+/models/
+/nepjol_scratch_cache.json
+__pycache__/
+*.pyc
+.env
+.vscode/
+.DS_Store
+
+# OS files
+Thumbs.db
+
