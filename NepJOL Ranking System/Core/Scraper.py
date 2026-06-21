@@ -7,6 +7,11 @@ import random
 import re
 import json
 import os
+import logging
+
+# Configure basic logging for the scraper
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
 # =====================================================================
 # SYSTEM REGISTRY ENDPOINTS & CACHE PARAMETERS
@@ -16,7 +21,7 @@ JPPS_URL = "https://www.journalquality.info/en/journals-all/?platform=nepjol"
 CACHE_FILE = "nepjol_scratch_cache.json"
 
 # Polite contact signature for the CrossRef API high-tier routing pool
-USER_EMAIL = "your-email@example.com" 
+USER_EMAIL = os.getenv("USER_EMAIL", "your-email@example.com")
 
 # Server Throttling Config
 BASE_DELAY = 1.5  
@@ -39,7 +44,8 @@ def load_local_cache():
         try:
             with open(CACHE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load cache file: %s", e)
             return {}
     return {}
 
@@ -49,7 +55,7 @@ def save_local_cache(cache_data):
         with open(CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"   [Cache Error] Failed to write cache to disk: {e}")
+        logger.warning("[Cache Error] Failed to write cache to disk: %s", e)
 
 # Load the cache database instantly at runtime initialize
 local_html_cache = load_local_cache()
@@ -78,7 +84,7 @@ def get_soup_with_cache(url, is_nepjol=True, force_refresh=False):
         response = session.get(url, headers=headers, timeout=20)
         
         if response.status_code in [429, 503, 504]:
-            print(f"   [Server Backoff] Status {response.status_code}. Backing off for 15s...")
+            logger.warning("[Server Backoff] Status %s for %s. Backing off...", response.status_code, url)
             time.sleep(15)
             response = session.get(url, headers=headers, timeout=25)
             
@@ -92,7 +98,7 @@ def get_soup_with_cache(url, is_nepjol=True, force_refresh=False):
         return BeautifulSoup(response.text, "html.parser")
         
     except requests.RequestException as e:
-        print(f"   [Network Log] Skipped node. Communications failed for {url}: {e}")
+        logger.warning("[Network Log] Skipped node. Communications failed for %s: %s", url, e)
         return None
 
 # =====================================================================
@@ -152,7 +158,7 @@ def parse_frequency_to_numeric(frequency_string):
 # =====================================================================
 def run_master_scraper():
     # --- Step 1: Querying and Localizing external JPPS Registry ---
-    print("--- Step 1: Querying and Localizing external JPPS Registry ---")
+    logger.info("--- Step 1: Querying and Localizing external JPPS Registry ---")
     jpps_dictionary = {}
     jpps_soup = get_soup_with_cache(JPPS_URL, is_nepjol=False)
 
@@ -167,16 +173,16 @@ def run_master_scraper():
                         "rating": cells[2].get_text(strip=True),
                         "last_assessed": cells[3].get_text(strip=True)
                     }
-    print(f"Successfully cached {len(jpps_dictionary)} records. Moving to core pipeline...\n")
+    logger.info("Successfully cached %s records. Moving to core pipeline...\n", len(jpps_dictionary))
 
     # --- Step 2: NepJOL Pipeline Run with Engine Intelligent Hook Caching ---
-    print("--- Step 2: Extracting NepJOL Journals (Polite Caching Active) ---")
+    logger.info("--- Step 2: Extracting NepJOL Journals (Polite Caching Active) ---")
     home_soup = get_soup_with_cache(NEPJOL_URL)
     master_dataset = []
 
     if home_soup:
         journal_links = home_soup.select("h3 a[href]")
-        print(f"Discovered {len(journal_links)} total target entries across the root platform portal.")
+        logger.info("Discovered %s total target entries across the root platform portal.", len(journal_links))
         
         for journal in journal_links:
             nepjol_name = journal.get_text(strip=True)
@@ -184,7 +190,7 @@ def run_master_scraper():
             if journal_url and journal_url.startswith("/"):
                 journal_url = requests.compat.urljoin(NEPJOL_URL, journal_url)
 
-            print(f"\n[Processing Journal]: {nepjol_name}")
+            logger.info("\n[Processing Journal]: %s", nepjol_name)
             journal_soup = get_soup_with_cache(journal_url)
             if not journal_soup:
                 continue
@@ -299,12 +305,12 @@ def run_master_scraper():
                     })
 
     # --- Step 3: Data Structuring and Multi-CSV Exports to data/ folder ---
-    print("\n--- Step 3: Compiling Final Data Structuring & Multi-CSV Exports ---")
+    logger.info("\n--- Step 3: Compiling Final Data Structuring & Multi-CSV Exports ---")
     df_all = pd.DataFrame(master_dataset)
 
     if not df_all.empty:
-        df_all['Views'] = pd.to_numeric(df_all['Views'].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
-        df_all['Downloads'] = pd.to_numeric(df_all['Downloads'].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
+        df_all['Views'] = pd.to_numeric(df_all['Views'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
+        df_all['Downloads'] = pd.to_numeric(df_all['Downloads'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         df_all['Citations'] = df_all['Citations'].fillna(0).astype(int)
 
         df_all['Year'] = pd.to_datetime(df_all['Published Date'], errors='coerce').dt.year
@@ -356,14 +362,17 @@ def run_master_scraper():
         df_journals = df_journals.sort_values(by="Journal Name", ascending=True, key=lambda col: col.str.strip().str.lower())
         df_journals.to_csv(os.path.join("data", "journals_metadata.csv"), index=False)
         
-        print("\n========================================================================")
-        print("✅ [SUCCESS] All target outputs written directly to local /data folder:")
-        print("   -> data/journals_metadata.csv")
-        print("   -> data/articles_metadata.csv")
-        print("   -> data/journal_issues_per_year.csv")
-        print("========================================================================")
+        logger.info("\n========================================================================")
+        logger.info("✅ [SUCCESS] All target outputs written directly to local /data folder:")
+        logger.info("   -> data/journals_metadata.csv")
+        logger.info("   -> data/articles_metadata.csv")
+        logger.info("   -> data/journal_issues_per_year.csv")
+        logger.info("========================================================================")
     else:
-        print("Pipeline Alert: No master dataset rows generated.")
+        logger.info("Pipeline Alert: No master dataset rows generated.")
+
+# Backward-compatible alias for package export
+run_nepjol_scraper = run_master_scraper
 
 if __name__ == "__main__":
     run_master_scraper()
