@@ -7,6 +7,43 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.model_selection import KFold
 import os
 import pickle  # NEW: For serializing the model layers
+import hashlib
+import hmac
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+
+# Security: maximum input CSV size to guard against huge uploads (50 MB)
+MAX_INPUT_FILE_BYTES = 50 * 1024 * 1024
+
+# Signing key (HMAC) for model artifacts - must be a bytes secret
+MODEL_SIGNING_KEY = os.getenv("MODEL_SIGNING_KEY")
+
+
+def _write_signed_file(path, data_bytes):
+    """Write bytes to disk atomically and create an HMAC signature file if a key is present."""
+    tmp_path = path + ".tmp"
+    with open(tmp_path, 'wb') as f:
+        f.write(data_bytes)
+    os.replace(tmp_path, path)
+    # Restrict file permissions to owner read/write
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+    if MODEL_SIGNING_KEY:
+        sig = hmac.new(MODEL_SIGNING_KEY.encode('utf-8'), data_bytes, hashlib.sha256).hexdigest()
+        sig_path = path + ".hmac"
+        with open(sig_path, 'w') as sf:
+            sf.write(sig)
+        try:
+            os.chmod(sig_path, 0o600)
+        except Exception:
+            pass
+
 
 def process_ml_rankings():
     """
@@ -28,7 +65,20 @@ def process_ml_rankings():
             "message": f"Data runtime error: Source file missing at '{input_path}'. Please run the scraper first."
         }
 
-    df_raw = pd.read_csv(input_path)
+    # Basic file size guard
+    try:
+        size = os.path.getsize(input_path)
+        if size > MAX_INPUT_FILE_BYTES:
+            return {"status": "error", "message": "Input data file is too large. Aborting for security reasons."}
+    except OSError:
+        pass
+
+    # Read CSV defensively: don't execute arbitrary code and coerce dtypes
+    try:
+        df_raw = pd.read_csv(input_path)
+    except Exception as e:
+        logger.exception("Failed to read input CSV: %s", e)
+        return {"status": "error", "message": "Failed to parse input data file."}
     
     if df_raw.empty:
         return {
@@ -53,21 +103,26 @@ def process_ml_rankings():
         "no star": 0.0, "no stars": 0.0,
         "New Title": 0.5, "N/A": 0.0
     }
-    df_clean['JPPS_Numeric'] = df_clean['JPPS Rating'].astype(str).str.strip().map(jpps_map).fillna(0.0)
+    df_clean['JPPS_Numeric'] = df_clean.get('JPPS Rating', pd.Series()).astype(str).str.strip().map(jpps_map).fillna(0.0)
 
     for col in fill_zeros:
-        Q1 = df_clean[col].quantile(0.25)
-        Q3 = df_clean[col].quantile(0.75)
-        IQR = Q3 - Q1
-        upper_whisker = Q3 + 1.5 * IQR
-        
-        if upper_whisker > 0:
-            df_clean[col] = np.where(df_clean[col] > upper_whisker, upper_whisker, df_clean[col])
+        if col in df_clean.columns:
+            Q1 = df_clean[col].quantile(0.25)
+            Q3 = df_clean[col].quantile(0.75)
+            IQR = Q3 - Q1
+            upper_whisker = Q3 + 1.5 * IQR
+            
+            if upper_whisker > 0:
+                df_clean[col] = np.where(df_clean[col] > upper_whisker, upper_whisker, df_clean[col])
 
     # -----------------------------------------------------------------
     # STEP 3: FEATURE MATRIX STANDARDIZATION
     # -----------------------------------------------------------------
     ml_features = ['Average_Views', 'Average_Downloads', 'Average_Citations', 'JPPS_Numeric', 'Total_Articles']
+    for feat in ml_features:
+        if feat not in df_clean.columns:
+            df_clean[feat] = 0
+
     X = df_clean[ml_features].values
 
     scaler = StandardScaler()
@@ -130,15 +185,29 @@ def process_ml_rankings():
     # Cache output copy to disk data layer
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df_ranked.to_csv(output_path, index=False)
+    try:
+        os.chmod(output_path, 0o600)
+    except Exception:
+        pass
 
     # -----------------------------------------------------------------
     # STEP 7: SERIALIZE WORK PRODUCTS USING PICKLE (NEW ARCHITECTURE)
     # -----------------------------------------------------------------
     # We save the model and the scaler so app.py doesn't have to train them
-    with open(os.path.join(models_dir, "kmeans_model.pkl"), "wb") as f:
-        pickle.dump(production_kmeans, f)
-    with open(os.path.join(models_dir, "scaler_transformer.pkl"), "wb") as f:
-        pickle.dump(scaler, f)
+    km_path = os.path.join(models_dir, "kmeans_model.pkl")
+    scaler_path = os.path.join(models_dir, "scaler_transformer.pkl")
+
+    try:
+        km_bytes = pickle.dumps(production_kmeans)
+        scaler_bytes = pickle.dumps(scaler)
+
+        _write_signed_file(km_path, km_bytes)
+        _write_signed_file(scaler_path, scaler_bytes)
+
+        logger.info("Models serialized and signed (if signing key provided).")
+    except Exception as e:
+        logger.exception("Failed to serialize models: %s", e)
+        return {"status": "error", "message": "Failed to serialize models."}
 
     return {
         "status": "success",
@@ -153,10 +222,10 @@ def process_ml_rankings():
     }
 
 if __name__ == "__main__":
-    print("⚙️ [PIPELINE RUNTIME] Manipulating data and saving pickles...")
+    logger.info("⚙️ [PIPELINE RUNTIME] Manipulating data and saving pickles...")
     results = process_ml_rankings()
     if results.get("status") == "success":
-        print(f"📊 Processed and saved {results['metadata']['total_journals']} records to disk.")
-        print(f"💾 Model files successfully generated via Pickle.")
+        logger.info(f"📊 Processed and saved {results['metadata']['total_journals']} records to disk.")
+        logger.info(f"💾 Model files successfully generated via Pickle.")
     else:
-        print(f"❌ Pipeline failed: {results.get('message')}")
+        logger.error(f"❌ Pipeline failed: {results.get('message')}")

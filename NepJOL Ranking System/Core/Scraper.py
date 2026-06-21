@@ -8,6 +8,8 @@ import re
 import json
 import os
 import logging
+import urllib.parse
+import urllib.robotparser
 
 # Configure basic logging for the scraper
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -35,9 +37,20 @@ USER_AGENTS = [
 
 session = requests.Session()
 
+# Allowed hostnames for external requests (prevents SSRF to arbitrary hosts)
+ALLOWED_HOSTNAMES = {
+    urllib.parse.urlparse(NEPJOL_URL).hostname,
+    urllib.parse.urlparse(JPPS_URL).hostname,
+    'api.crossref.org',
+    'portal.issn.org'
+}
+
 # =====================================================================
 # CACHE CONTROLLER ENGINE
 # =====================================================================
+MAX_CACHE_BYTES = 10 * 1024 * 1024  # 10 MB cache limit
+
+
 def load_local_cache():
     """Loads localized scraper cache if file footprint exists."""
     if os.path.exists(CACHE_FILE):
@@ -49,24 +62,93 @@ def load_local_cache():
             return {}
     return {}
 
+
+def _prune_cache(cache_map):
+    """Prunes cache if it grows too large (simple oldest-entry removal)."""
+    try:
+        # approximate size by JSON length
+        s = json.dumps(cache_map)
+        if len(s.encode('utf-8')) > MAX_CACHE_BYTES:
+            # remove half of entries
+            keys = list(cache_map.keys())
+            for k in keys[:len(keys)//2]:
+                cache_map.pop(k, None)
+    except Exception:
+        pass
+    return cache_map
+
+
 def save_local_cache(cache_data):
     """Commits volatile data strings to permanent local storage state."""
     try:
-        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        cache_data = _prune_cache(cache_data)
+        tmp = CACHE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=4)
+        os.replace(tmp, CACHE_FILE)
+        try:
+            os.chmod(CACHE_FILE, 0o600)
+        except Exception:
+            pass
     except Exception as e:
-        logger.warning("[Cache Error] Failed to write cache to disk: %s", e)
+        logger.warning("   [Cache Error] Failed to write cache to disk: %s", e)
 
 # Load the cache database instantly at runtime initialize
 local_html_cache = load_local_cache()
+
+# Basic robots.txt parser caching
+_robot_parser = None
+
+def _get_robot_parser(base_url=NEPJOL_URL):
+    global _robot_parser
+    if _robot_parser is None:
+        rp = urllib.robotparser.RobotFileParser()
+        try:
+            rp.set_url(urllib.parse.urljoin(base_url, '/robots.txt'))
+            rp.read()
+            _robot_parser = rp
+        except Exception:
+            _robot_parser = None
+    return _robot_parser
+
+
+def _is_allowed_by_robots(url):
+    rp = _get_robot_parser(NEPJOL_URL)
+    if not rp:
+        return True
+    try:
+        return rp.can_fetch(USER_AGENTS[0], url)
+    except Exception:
+        return True
+
+
+def _is_hostname_allowed(url):
+    try:
+        host = urllib.parse.urlparse(url).hostname
+        return host in ALLOWED_HOSTNAMES
+    except Exception:
+        return False
+
 
 def get_soup_with_cache(url, is_nepjol=True, force_refresh=False):
     """
     Fetches raw HTML pages. Checks the local JSON cache file first.
     Only executes live requests if missing, obeying strict rate limits.
     """
-    if not force_refresh and url in local_html_cache:
-        return BeautifulSoup(local_html_cache[url], "html.parser")
+    # Normalize URL
+    parsed = urllib.parse.urljoin(NEPJOL_URL, url)
+
+    if not _is_hostname_allowed(parsed):
+        logger.warning("Blocked request to disallowed hostname: %s", parsed)
+        return None
+
+    if not force_refresh and parsed in local_html_cache:
+        return BeautifulSoup(local_html_cache[parsed], "html.parser")
+
+    # Respect robots
+    if not _is_allowed_by_robots(parsed):
+        logger.info("Robots.txt disallows fetching %s", parsed)
+        return None
 
     # Enforce proactive server-friendly cooling periods on live cache misses
     if is_nepjol:
@@ -81,29 +163,30 @@ def get_soup_with_cache(url, is_nepjol=True, force_refresh=False):
             'Connection': 'keep-alive'
         }
         
-        response = session.get(url, headers=headers, timeout=20)
+        response = session.get(parsed, headers=headers, timeout=20)
         
         if response.status_code in [429, 503, 504]:
-            logger.warning("[Server Backoff] Status %s for %s. Backing off...", response.status_code, url)
+            logger.warning("   [Server Backoff] Status %s. Backing off for 15s...", response.status_code)
             time.sleep(15)
-            response = session.get(url, headers=headers, timeout=25)
+            response = session.get(parsed, headers=headers, timeout=25)
             
         response.raise_for_status()
         
         # Save structural source text response directly into cache system registry map
         if is_nepjol: # Only save bulky structural pages to avoid freezing storage arrays
-            local_html_cache[url] = response.text
+            local_html_cache[parsed] = response.text
             save_local_cache(local_html_cache)
             
         return BeautifulSoup(response.text, "html.parser")
         
     except requests.RequestException as e:
-        logger.warning("[Network Log] Skipped node. Communications failed for %s: %s", url, e)
+        logger.warning("   [Network Log] Skipped node. Communications failed for %s: %s", parsed, e)
         return None
 
 # =====================================================================
 # ALGORITHMIC UTILITIES
 # =====================================================================
+
 def validate_issn_checksum(issn_str):
     """Validates an ISSN using the official ISO 3297 Modulo 11 check-digit algorithm."""
     if not issn_str or issn_str == "N/A":
@@ -116,9 +199,19 @@ def validate_issn_checksum(issn_str):
     check_digit = 10 if last_char == 'X' else int(last_char)
     return (total + check_digit) % 11 == 0
 
+
+def _is_valid_doi(doi_string):
+    if not doi_string or doi_string == "N/A":
+        return False
+    doi = doi_string.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
+    # Very simple DOI pattern check
+    pattern = re.compile(r'^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$')
+    return bool(pattern.match(doi))
+
+
 def get_crossref_citations(doi_string):
     """Queries the free CrossRef Open REST API endpoint safely using the article DOI."""
-    if not doi_string or doi_string == "N/A":
+    if not _is_valid_doi(doi_string):
         return 0
     raw_doi = doi_string.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
     crossref_api_url = f"https://api.crossref.org/works/{raw_doi}"
@@ -132,6 +225,7 @@ def get_crossref_citations(doi_string):
         except Exception:
             pass
     return 0
+
 
 def parse_frequency_to_numeric(frequency_string):
     """Translates natural text frequency expressions into an exact integer metric."""
