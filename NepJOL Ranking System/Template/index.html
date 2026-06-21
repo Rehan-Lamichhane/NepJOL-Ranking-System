@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NepJOL Journal & Country Rank (Pickled ML Engine)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-[#f8fafc] text-slate-900 antialiased min-h-screen flex flex-col">
+
+    <nav class="bg-[#0f172a] border-b border-slate-800 text-white sticky top-0 z-40 shadow-sm shadow-slate-950/20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-sky-500 text-slate-950 p-2 rounded-lg font-black tracking-tighter text-lg shadow-md shadow-sky-500/20">
+                        NJR
+                    </div>
+                    <div>
+                        <span class="text-lg font-bold tracking-tight block text-slate-100">NepJOL Ranking <span class="text-sky-400 font-medium text-xs bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded ml-1">PICKLED MODEL</span></span>
+                        <span class="text-[10px] text-slate-400 block -mt-1 font-mono">DECOUPLED DATA PLATFORM ARCHITECTURE</span>
+                    </div>
+                </div>
+                <div class="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-300">
+                    <a href="#" class="text-sky-400 border-b-2 border-sky-400 py-5 px-1 flex items-center gap-1.5"><i data-lucide="layers" class="w-4 h-4"></i> Journal Rankings</a>
+                    <a href="#" class="hover:text-white transition-colors flex items-center gap-1.5"><i data-lucide="book-open" class="w-4 h-4"></i> Article Directory</a>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <div class="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs px-3 py-1.5 rounded-full font-mono font-medium">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> PICKLE MODEL LIVE
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <header class="bg-gradient-to-r from-[#1e293b] via-[#0f172a] to-[#1e293b] text-white py-12 px-4 shadow-inner relative overflow-hidden border-b border-slate-800">
+        <div class="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+        <div class="max-w-4xl mx-auto text-center relative z-10 space-y-4">
+            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+                Nepalese Journal Intelligence Repository
+            </h2>
+            <p class="text-slate-400 max-w-xl mx-auto text-sm sm:text-base">
+                Query calculations evaluated instantly via your background scikit-learn analytics engine workspace layers.
+            </p>
+            
+            <div class="bg-white p-2 rounded-xl shadow-xl flex flex-col md:flex-row items-center gap-2 max-w-2xl mx-auto text-slate-800 border border-slate-200 mt-6">
+                <div class="flex items-center gap-2 px-3 py-2 w-full border-b md:border-b-0 md:border-r border-slate-100">
+                    <i data-lucide="search" class="w-5 h-5 text-slate-400 flex-shrink-0"></i>
+                    <input id="masterSearch" type="text" placeholder="Filter indexed titles or ISSN signatures..." class="w-full bg-transparent text-sm font-medium focus:outline-none placeholder-slate-400" />
+                </div>
+                <div class="flex items-center gap-1 px-2 w-full md:w-auto justify-between md:justify-start">
+                    <select id="jppsFilter" class="bg-slate-50 hover:bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 rounded-lg border border-slate-200 focus:outline-none transition-colors cursor-pointer w-full md:w-36">
+                        <option value="ALL">All JPPS Tiers</option>
+                        <option value="3 stars">3 Stars</option>
+                        <option value="2 stars">2 Stars</option>
+                        <option value="1 star">1 Star</option>
+                        <option value="no star">No Star</option>
+                        <option value="New Title">New Title</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 -mt-6 relative z-20">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/60 flex items-center space-x-4">
+                <div class="p-3 bg-sky-50 text-sky-600 rounded-lg"><i data-lucide="book-open-check" class="w-6 h-6"></i></div>
+                <div>
+                    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider block">Indexed Journals</span>
+                    <span id="statJournals" class="text-2xl font-bold tracking-tight text-slate-900">--</span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/60 flex items-center space-x-4">
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><i data-lucide="award" class="w-6 h-6"></i></div>
+                <div>
+                    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider block">Max Evaluated Score</span>
+                    <span id="statMaxScore" class="text-2xl font-bold tracking-tight text-emerald-600">--</span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/60 flex items-center space-x-4">
+                <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><i data-lucide="shield-check" class="w-6 h-6"></i></div>
+                <div>
+                    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider block">Model Target</span>
+                    <span id="statModelStatus" class="text-sm font-bold tracking-tight text-indigo-600 block mt-1 uppercase bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">PICKLED STATE</span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/60 flex items-center space-x-4">
+                <div class="p-3 bg-purple-50 text-purple-600 rounded-lg"><i data-lucide="binary" class="w-6 h-6"></i></div>
+                <div>
+                    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider block">K-Means Clusters</span>
+                    <span id="statClusters" class="text-2xl font-bold tracking-tight text-purple-600">--</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <main class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow">
+        
+        <div class="lg:col-span-2 space-y-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200/80 overflow-hidden">
+                <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i data-lucide="trending-up" class="w-5 h-5 text-sky-500"></i> Calculated Platform Leaderboard Rankings
+                        </h3>
+                        <p class="text-xs text-slate-500 mt-0.5">Metrics parsed directly via pipeline metrics outputs</p>
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                        <thead class="bg-slate-50 font-semibold text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+                            <tr>
+                                <th class="px-5 py-4 text-center w-16">Rank</th>
+                                <th class="px-5 py-4">Journal Properties</th>
+                                <th class="px-5 py-4 text-center">JPPS Tier</th>
+                                <th class="px-5 py-4 text-right">Avg Views</th>
+                                <th class="px-5 py-4 text-right">Citations</th>
+                                <th class="px-5 py-4 text-right pr-6">Composite Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboardRows" class="divide-y divide-slate-100 text-slate-700 bg-white">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="space-y-6">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/80 space-y-4">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="scatter-chart" class="w-4 h-4 text-sky-500"></i>
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">Pickled Model Cluster Stratification</h4>
+                </div>
+                <div class="h-64 relative"><canvas id="scatterCanvas"></canvas></div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200/80 space-y-4">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="pie-chart" class="w-4 h-4 text-purple-500"></i>
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400">Cohort Mass Representation</h4>
+                </div>
+                <div class="h-64 relative flex justify-center"><canvas id="donutCanvas"></canvas></div>
+            </div>
+        </div>
+    </main>
+
+    <div id="drawerOverlay" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden z-50 transition-opacity duration-300 opacity-0" onclick="closeDrawer()">
+        <div id="drawerContainer" class="fixed inset-y-0 right-0 w-full max-w-2xl bg-white shadow-2xl flex flex-col transform translate-x-full transition-transform duration-300 ease-in-out" onclick="event.stopPropagation()">
+            
+            <div class="p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+                <div>
+                    <span id="drawerJournalBadge" class="text-[10px] font-bold tracking-widest uppercase bg-sky-50/20 text-sky-400 px-2 py-1 rounded">JOURNAL METRICS REGISTER</span>
+                    <h4 id="drawerJournalTitle" class="text-lg font-bold tracking-tight mt-1 text-slate-100">Journal Name</h4>
+                </div>
+                <button onclick="closeDrawer()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <div class="p-6 overflow-y-auto custom-scrollbar flex-grow space-y-6">
+                <div class="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/60 text-center text-sm">
+                    <div><span class="text-[10px] uppercase font-bold text-slate-400 block">ISSN Number</span><span id="drawISSN" class="font-mono font-semibold text-slate-800 mt-0.5 block">--</span></div>
+                    <div><span class="text-[10px] uppercase font-bold text-slate-400 block">Frequency Track</span><span id="drawFreq" class="font-semibold text-slate-800 mt-0.5 block">-- Issues/Yr</span></div>
+                    <div><span class="text-[10px] uppercase font-bold text-slate-400 block">Lifecycle Volumes</span><span id="drawTotalIssues" class="font-semibold text-slate-800 mt-0.5 block">--</span></div>
+                </div>
+
+                <div class="space-y-4">
+                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><i data-lucide="text-quote" class="w-4 h-4 text-sky-500"></i> Dynamic DOAJ Relational Documents Log</h5>
+                    <div id="articlesLoadingState" class="text-center py-8 text-slate-400 font-medium text-xs space-y-2">
+                        <div class="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        <p>Querying background database lines...</p>
+                    </div>
+                    <div id="drawerArticlesList" class="space-y-3 hidden">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-white border-t border-slate-200 mt-auto py-4 text-center text-xs font-medium text-slate-400">
+        <p>© 2026 NepJOL Repository Index Ecosystem Framework. Decoupled Pipeline Architecture Mode.</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
